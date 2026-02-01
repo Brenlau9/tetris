@@ -1,4 +1,4 @@
-import { Rotation, Tetromino, Point } from "./types";
+import type { Rotation, Tetromino, Point } from "./types";
 
 /**
  * 4x4 cell coordinates for each piece per rotation state.
