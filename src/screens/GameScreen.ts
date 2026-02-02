@@ -198,7 +198,7 @@ export class GameScreen implements Screen {
 
     // Enable input only during play
     this.input.setEnabled(this.engine.state === "playing");
-
+    this.input.update(dt);
     this.engine.update(dt);
 
     this.raf = requestAnimationFrame(this.loop);

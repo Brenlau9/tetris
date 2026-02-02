@@ -12,3 +12,7 @@ export const LOCK_DELAY_MS = 500;   // lock delay duration
 
 export const COUNTDOWN_SECONDS = 3;
 export const LINES_TARGET = 40;
+
+export const DAS_MS = 75;
+export const ARR_MS = 0;
+
