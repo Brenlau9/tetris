@@ -13,6 +13,10 @@ export class GameScreen implements Screen {
   private canvas!: HTMLCanvasElement;
   private ctx!: CanvasRenderingContext2D;
 
+  // NEW: overlay canvas above the board for hidden-row piece visibility
+  private spawnCanvas!: HTMLCanvasElement;
+  private spawnCtx!: CanvasRenderingContext2D;
+
   private holdCanvas!: HTMLCanvasElement;
   private holdCtx!: CanvasRenderingContext2D;
 
@@ -36,18 +40,25 @@ export class GameScreen implements Screen {
     this.root = document.createElement("div");
     this.root.className = "card";
 
+    // NOTE:
+    // - boardStage has overflow: visible so the spawnCanvas can show above.
+    // - boardClip keeps the board canvas clipped to exactly visible height.
     this.root.innerHTML = `
       <div class="gameLayout">
-        <div class="canvasWrap" style="position: relative; padding: 12px;">
+        <div class="canvasWrap" style="position: relative; padding: 12px; overflow: visible;">
           <div class="boardRow">
             <div class="previewBox">
               <div class="previewTitle">Hold</div>
               <canvas id="holdCanvas" class="previewCanvas"></canvas>
             </div>
 
-            <div style="position: relative;">
-              <canvas id="game"></canvas>
-              <div class="bigOverlay" id="overlay" style="display:none;"><div></div></div>
+            <div id="boardStage" style="position: relative; overflow: visible;">
+              <canvas id="spawnCanvas" style="position:absolute; left:0; top:-${HIDDEN_ROWS * CELL}px; pointer-events:none;"></canvas>
+
+              <div id="boardClip" style="position: relative; overflow: hidden;">
+                <canvas id="game"></canvas>
+                <div class="bigOverlay" id="overlay" style="display:none;"><div></div></div>
+              </div>
             </div>
 
             <div class="previewBox">
@@ -82,16 +93,30 @@ export class GameScreen implements Screen {
 
     /* ---------- canvases ---------- */
 
+    // Board canvas stays EXACTLY visible height (no preview area)
     this.canvas = this.root.querySelector<HTMLCanvasElement>("#game")!;
     this.canvas.width = COLS * CELL;
     this.canvas.height = VISIBLE_ROWS * CELL;
     this.ctx = this.canvas.getContext("2d")!;
 
+    // Spawn overlay canvas renders only the blocks above the board (hidden rows)
+    this.spawnCanvas = this.root.querySelector<HTMLCanvasElement>("#spawnCanvas")!;
+    this.spawnCanvas.width = COLS * CELL;
+    this.spawnCanvas.height = HIDDEN_ROWS * CELL;
+    this.spawnCtx = this.spawnCanvas.getContext("2d")!;
+
+    // Make sure the boardClip matches the board canvas size
+    const boardClip = this.root.querySelector<HTMLDivElement>("#boardClip")!;
+    boardClip.style.width = `${this.canvas.width}px`;
+    boardClip.style.height = `${this.canvas.height}px`;
+
+    // Hold preview
     this.holdCanvas = this.root.querySelector<HTMLCanvasElement>("#holdCanvas")!;
     this.holdCanvas.width = 4 * CELL;
     this.holdCanvas.height = 4 * CELL;
     this.holdCtx = this.holdCanvas.getContext("2d")!;
 
+    // Queue preview (compact)
     this.queueCanvas = this.root.querySelector<HTMLCanvasElement>("#queueCanvas")!;
     this.queueCanvas.width = 4 * CELL;
     this.queueCanvas.height = 14 * CELL;
@@ -99,25 +124,29 @@ export class GameScreen implements Screen {
 
     /* ---------- engine ---------- */
 
+    const overlay = this.root.querySelector<HTMLDivElement>("#overlay")!;
+    const overlayText = overlay.querySelector("div")!;
+
     this.engine = new Engine({
       onFinish: (timeMs) => {
         const records = loadRecords();
         records.sprint40.completedRuns++;
 
-        if (
-          records.sprint40.bestTimeMs === null ||
-          timeMs < records.sprint40.bestTimeMs
-        ) {
+        if (records.sprint40.bestTimeMs === null || timeMs < records.sprint40.bestTimeMs) {
           records.sprint40.bestTimeMs = timeMs;
           records.sprint40.bestDateISO = new Date().toISOString();
         }
 
         saveRecords(records);
+
+        overlay.style.display = "grid";
+        overlayText.textContent = formatMs(timeMs);
       },
       onTopOut: () => this.router.go("start"),
       onTick: () => {
         this.render();
         this.updateHud();
+        this.updateOverlay();
       },
     });
 
@@ -145,15 +174,16 @@ export class GameScreen implements Screen {
       softDrop: (down) => this.engine.setSoftDrop(down),
     });
 
-    this.root.querySelector("#homeBtn")!.addEventListener("click", () =>
-      this.router.go("start")
-    );
-    this.root.querySelector("#restartBtn")!.addEventListener("click", () =>
-      this.engine.restart()
-    );
+    this.root.querySelector("#homeBtn")!.addEventListener("click", () => this.router.go("start"));
+    this.root.querySelector("#restartBtn")!.addEventListener("click", () => this.engine.restart());
 
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.loop);
+
+    // initial paint
+    this.render();
+    this.updateHud();
+    this.updateOverlay();
   }
 
   unmount() {
@@ -166,51 +196,114 @@ export class GameScreen implements Screen {
     const dt = Math.min(50, t - this.last);
     this.last = t;
 
+    // Enable input only during play
     this.input.setEnabled(this.engine.state === "playing");
+
     this.engine.update(dt);
 
     this.raf = requestAnimationFrame(this.loop);
   };
 
+  private updateHud() {
+    this.root.querySelector<HTMLSpanElement>("#time")!.textContent = formatMs(this.engine.timeMs);
+    this.root.querySelector<HTMLSpanElement>("#rem")!.textContent = String(this.engine.getLinesRemaining());
+  }
+
+  private updateOverlay() {
+    const overlay = this.root.querySelector<HTMLDivElement>("#overlay")!;
+    const overlayText = overlay.querySelector("div")!;
+
+    if (this.engine.state === "countdown") {
+      overlay.style.display = "grid";
+      overlayText.textContent = this.engine.countdownLeft > 0 ? String(this.engine.countdownLeft) : "GO";
+      return;
+    }
+
+    if (this.engine.state === "finished") {
+      overlay.style.display = "grid";
+      return;
+    }
+
+    overlay.style.display = "none";
+  }
+
   /* ---------- render ---------- */
 
   private render() {
+    // 1) Draw the normal board (ONLY visible rows)
+    this.renderBoard();
+
+    // 2) Draw the spawn overlay (ONLY blocks above the board, no background)
+    this.renderSpawnOverlay();
+
+    // 3) Previews
+    this.renderHoldPreview();
+    this.renderQueuePreview();
+  }
+
+  private renderBoard() {
     const ctx = this.ctx;
 
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // locked cells
+    // locked cells (visible only)
     for (let y = HIDDEN_ROWS; y < ROWS; y++) {
+      const vy = y - HIDDEN_ROWS; // 0..VISIBLE_ROWS-1
       for (let x = 0; x < COLS; x++) {
         const v = this.engine.board.grid[y][x];
-        if (v) drawCell(ctx, x, y - HIDDEN_ROWS, v);
+        if (v) drawCell(ctx, x, vy, v);
       }
     }
 
-    // active piece
+    // active piece blocks that are in visible rows only
     const a = this.engine.active;
     if (a) {
       const blocks = SHAPES[a.type][a.rot];
       const color = pieceColorIndex(a.type);
+
       for (const b of blocks) {
-        const vy = a.y + b.y - HIDDEN_ROWS;
+        const boardY = a.y + b.y;
+        if (boardY < HIDDEN_ROWS) continue;
+        if (boardY >= ROWS) continue;
+
+        const vy = boardY - HIDDEN_ROWS;
         if (vy >= 0 && vy < VISIBLE_ROWS) {
           drawCell(ctx, a.x + b.x, vy, color);
         }
       }
     }
 
-    // grid lines (RESTORED)
+    // grid lines (visible board only)
     this.drawGrid();
+  }
 
-    this.renderHoldPreview();
-    this.renderQueuePreview();
+  private renderSpawnOverlay() {
+    const ctx = this.spawnCtx;
+
+    // transparent background: just clear
+    ctx.clearRect(0, 0, this.spawnCanvas.width, this.spawnCanvas.height);
+
+    const a = this.engine.active;
+    if (!a) return;
+
+    const blocks = SHAPES[a.type][a.rot];
+    const color = pieceColorIndex(a.type);
+
+    // draw ONLY blocks above the visible playfield (boardY < HIDDEN_ROWS)
+    for (const b of blocks) {
+      const boardY = a.y + b.y;
+      if (boardY < 0 || boardY >= HIDDEN_ROWS) continue;
+
+      const pxY = boardY * CELL; // 0..HIDDEN_ROWS*CELL
+      drawCellPixels(ctx, (a.x + b.x) * CELL, pxY, CELL, color);
+    }
   }
 
   private drawGrid() {
     const ctx = this.ctx;
+
     ctx.strokeStyle = "rgba(0,0,0,0.06)";
 
     for (let x = 0; x <= COLS; x++) {
@@ -240,20 +333,13 @@ export class GameScreen implements Screen {
     const ctx = this.queueCtx;
     ctx.clearRect(0, 0, this.queueCanvas.width, this.queueCanvas.height);
 
-    const spacing = CELL;
+    const spacing = CELL; // exactly one block between pieces
     let y = 0;
 
     for (const t of this.engine.queue) {
       const h = drawPreviewPieceSeamless(ctx, t, 0, y, CELL);
       y += h + spacing;
     }
-  }
-
-  private updateHud() {
-    this.root.querySelector<HTMLSpanElement>("#time")!.textContent =
-      formatMs(this.engine.timeMs);
-    this.root.querySelector<HTMLSpanElement>("#rem")!.textContent =
-      String(this.engine.getLinesRemaining());
   }
 }
 
@@ -265,6 +351,21 @@ function drawCell(ctx: CanvasRenderingContext2D, x: number, y: number, c: number
   ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
   ctx.strokeStyle = "rgba(0,0,0,0.15)";
   ctx.strokeRect(x * CELL + 0.5, y * CELL + 0.5, CELL - 1, CELL - 1);
+}
+
+// Pixel-positioned cell for the spawn overlay canvas
+function drawCellPixels(
+  ctx: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  size: number,
+  colorIndex: number
+) {
+  const colors = ["", "#00bcd4", "#ffb300", "#8e24aa", "#43a047", "#e53935", "#1e88e5", "#fb8c00"];
+  ctx.fillStyle = colors[colorIndex];
+  ctx.fillRect(px, py, size, size);
+  ctx.strokeStyle = "rgba(0,0,0,0.15)";
+  ctx.strokeRect(px + 0.5, py + 0.5, size - 1, size - 1);
 }
 
 function drawPreviewPieceSeamless(
