@@ -1,6 +1,12 @@
 import { Bag7 } from "./Bag7";
 import { Board } from "./Board";
-import { COUNTDOWN_SECONDS, GRAVITY_MS, LINES_TARGET, LOCK_DELAY_MS, SOFT_DROP_MS } from "./constants";
+import {
+  COUNTDOWN_SECONDS,
+  GRAVITY_MS,
+  LINES_TARGET,
+  LOCK_DELAY_MS,
+  SOFT_DROP_MS,
+} from "./constants";
 import type { ActivePiece, Rotation, Tetromino } from "./types";
 import { getKicks, getKicks180, rot180, rotCCW, rotCW } from "./Rotation";
 
@@ -30,11 +36,14 @@ export class Engine {
   hold: Tetromino | null = null;
   holdUsedThisTurn = false;
 
+  // NEW: visible queue (next 5)
+  queue: Tetromino[] = [];
+
   // timing
   private fallAcc = 0;
   private lockAcc = 0;
   private softDropDown = false;
-  
+
   private events: EngineEvents;
 
   constructor(events: EngineEvents) {
@@ -57,8 +66,12 @@ export class Engine {
 
     this.softDropDown = false;
 
+    // Initialize visible queue (next 5)
+    this.queue = [];
+    while (this.queue.length < 5) this.queue.push(this.bag.next());
+
+    // Spawn first piece (countdown shows board + piece, but no input/gravity)
     this.spawn();
-    // During countdown: input ignored and gravity disabled.
   }
 
   setSoftDrop(isDown: boolean) {
@@ -112,8 +125,12 @@ export class Engine {
   }
 
   // -------- actions --------
-  moveLeft() { this.tryMove(-1, 0); }
-  moveRight() { this.tryMove(1, 0); }
+  moveLeft() {
+    this.tryMove(-1, 0);
+  }
+  moveRight() {
+    this.tryMove(1, 0);
+  }
 
   hardDrop() {
     if (this.state !== "playing") return;
@@ -122,9 +139,15 @@ export class Engine {
     this.lockPiece(true);
   }
 
-  rotateCW() { this.tryRotate(rotCW(this.active.rot)); }
-  rotateCCW() { this.tryRotate(rotCCW(this.active.rot)); }
-  rotate180() { this.tryRotate180(); }
+  rotateCW() {
+    this.tryRotate(rotCW(this.active.rot));
+  }
+  rotateCCW() {
+    this.tryRotate(rotCCW(this.active.rot));
+  }
+  rotate180() {
+    this.tryRotate180();
+  }
 
   holdPiece() {
     if (this.state !== "playing") return;
@@ -149,25 +172,22 @@ export class Engine {
 
   // -------- internals --------
   private spawn(forcedType?: Tetromino) {
-    const type = forcedType ?? this.bag.next();
+    // Pull from visible queue unless forced (hold swap)
+    const type = forcedType ?? this.queue.shift()!;
+    while (this.queue.length < 5) this.queue.push(this.bag.next());
+
     const piece: ActivePiece = {
       type,
       rot: 0 as Rotation,
       x: 3,
-      y: 0, // includes hidden rows in board coordinates
+      y: 0,
     };
-
-    // In SRS, spawn is slightly different for some pieces; keep minimal.
-    // Place piece in hidden rows by shifting up.
-    piece.y = 0; // row 0 is top hidden row
-    // Align to hidden: we have HIDDEN_ROWS; visible starts at y=HIDDEN_ROWS.
-    // Using y=0 is fine because shapes are within 4x4.
 
     this.active = piece;
     this.holdUsedThisTurn = false;
     this.lockAcc = 0;
 
-    // Top-out condition: failed spawn placement -> go to start screen
+    // Top-out: failed spawn placement -> go to start screen
     if (!this.board.canPlace(this.active)) {
       this.state = "finished";
       this.events.onTopOut();
@@ -194,9 +214,12 @@ export class Engine {
     const kicks = getKicks(this.active.type, from, to);
 
     for (const k of kicks) {
-      const test = { ...this.active, rot: to, x: this.active.x + k.x, y: this.active.y - k.y };
-      // Note: SRS tables are traditionally in (x, y) with y positive up.
-      // Our board y increases downward, so subtract kick.y.
+      const test = {
+        ...this.active,
+        rot: to,
+        x: this.active.x + k.x,
+        y: this.active.y - k.y, // board y grows downward
+      };
       if (this.board.canPlace(test)) {
         this.active = test;
         this.lockAcc = 0;
@@ -212,7 +235,12 @@ export class Engine {
     const kicks = getKicks180(this.active.type);
 
     for (const k of kicks) {
-      const test = { ...this.active, rot: to, x: this.active.x + k.x, y: this.active.y - k.y };
+      const test = {
+        ...this.active,
+        rot: to,
+        x: this.active.x + k.x,
+        y: this.active.y - k.y,
+      };
       if (this.board.canPlace(test)) {
         this.active = test;
         this.lockAcc = 0;
@@ -239,7 +267,6 @@ export class Engine {
     this.lockAcc = 0;
     this.fallAcc = 0;
 
-    // Hard drop typically locks instantly; already done by calling lockPiece(true)
     void fromHardDrop;
   }
 
