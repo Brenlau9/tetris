@@ -1,7 +1,7 @@
 import type { Tetromino } from "../game/types";
 import { Router, type Screen } from "../router/Router";
 import { DEFAULT_KEYBINDS } from "../input/defaultKeybinds";
-import { loadKeybinds, loadRecords, saveRecords } from "../storage/Storage";
+import { loadKeybinds, loadRecords, loadSettings, saveRecords } from "../storage/Storage";
 import { InputManager } from "../input/InputManager";
 import { Engine } from "../game/Engine";
 import { CELL, COLS, HIDDEN_ROWS, ROWS, VISIBLE_ROWS } from "../game/constants";
@@ -13,7 +13,7 @@ export class GameScreen implements Screen {
   private canvas!: HTMLCanvasElement;
   private ctx!: CanvasRenderingContext2D;
 
-  // overlay canvas above the board for hidden-row piece visibility
+  // NEW: overlay canvas above the board for hidden-row piece visibility
   private spawnCanvas!: HTMLCanvasElement;
   private spawnCtx!: CanvasRenderingContext2D;
 
@@ -36,10 +36,14 @@ export class GameScreen implements Screen {
 
   mount(container: HTMLElement) {
     const keybinds = loadKeybinds(DEFAULT_KEYBINDS);
+    const settings = loadSettings();
 
     this.root = document.createElement("div");
     this.root.className = "card";
 
+    // NOTE:
+    // - boardStage has overflow: visible so the spawnCanvas can show above.
+    // - boardClip keeps the board canvas clipped to exactly visible height.
     this.root.innerHTML = `
       <div class="gameLayout">
         <div class="canvasWrap" style="position: relative; padding: 12px; overflow: visible;">
@@ -147,11 +151,14 @@ export class GameScreen implements Screen {
       },
     });
 
+    // Apply runtime tuning
+    this.engine.setTuning({ softDropMs: settings.softDropMs });
     this.engine.startNewRun();
 
     /* ---------- input ---------- */
 
     this.input = new InputManager(keybinds);
+    this.input.setTuning({ dasMs: settings.dasMs, arrMs: settings.arrMs });
     this.input.mount();
     this.input.setEnabled(false);
 
@@ -398,8 +405,10 @@ function drawPreviewPieceSeamless(
 ): number {
   const blocks = SHAPES[type][0];
 
-  let minX = Infinity, maxX = -Infinity;
-  let minY = Infinity, maxY = -Infinity;
+  let minX = Infinity,
+    maxX = -Infinity;
+  let minY = Infinity,
+    maxY = -Infinity;
 
   for (const b of blocks) {
     minX = Math.min(minX, b.x);

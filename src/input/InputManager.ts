@@ -1,5 +1,4 @@
 import type { Action, Keybinds } from "./actions";
-import { ARR_MS, DAS_MS } from "../game/constants";
 
 type Handlers = Partial<Record<Action, () => void>>;
 type HeldHandlers = Partial<Record<Action, (isDown: boolean) => void>>;
@@ -14,74 +13,23 @@ export class InputManager {
   private handlers: Handlers = {};
   private heldHandlers: HeldHandlers = {};
 
-  // --- DAS/ARR state ---
+  // ---- Tuning (runtime configurable) ----
+  private dasMs = 75;
+  private arrMs = 0;
+
+  // ---- DAS/ARR state ----
   private repeatDir: RepeatDir = null;
   private dasAcc = 0;
   private arrAcc = 0;
   private repeating = false;
 
-  private onKeyDown = (e: KeyboardEvent) => {
-    if (!this.enabled) return;
-
-    const code = e.code;
-
-    // Stop browser scrolling while playing (arrows/space).
-    if (["ArrowLeft", "ArrowRight", "ArrowDown", "Space"].includes(code)) {
-      e.preventDefault();
-    }
-
-    if (this.down.has(code)) return; // edge-trigger only (avoid OS repeat)
-    this.down.add(code);
-
-    const action = this.codeToAction(code);
-    if (!action) return;
-
-    // Horizontal movement: start DAS/ARR tracking and do the immediate step.
-    if (action === "moveLeft") {
-      this.startHorizontal("left");
-      this.handlers.moveLeft?.(); // immediate move
-      return;
-    }
-    if (action === "moveRight") {
-      this.startHorizontal("right");
-      this.handlers.moveRight?.(); // immediate move
-      return;
-    }
-
-    // Other actions are normal edge-trigger.
-    this.handlers[action]?.();
-    this.heldHandlers[action]?.(true);
-  };
-
-  private onKeyUp = (e: KeyboardEvent) => {
-    const code = e.code;
-    this.down.delete(code);
-
-    const action = this.codeToAction(code);
-    if (!action) return;
-
-    // Release held handler (softDrop, etc.)
-    this.heldHandlers[action]?.(false);
-
-    // If releasing a horizontal key, decide whether to continue repeating in the other direction.
-    if (action === "moveLeft" || action === "moveRight") {
-      const leftDown = this.isActionDown("moveLeft");
-      const rightDown = this.isActionDown("moveRight");
-
-      if (leftDown && !rightDown) {
-        this.startHorizontal("left");
-        this.handlers.moveLeft?.(); // optional: immediate shift on direction switch
-      } else if (rightDown && !leftDown) {
-        this.startHorizontal("right");
-        this.handlers.moveRight?.();
-      } else {
-        this.resetHorizontal();
-      }
-    }
-  };
-
   constructor(keybinds: Keybinds) {
     this.keybinds = keybinds;
+  }
+
+  setTuning(opts: { dasMs: number; arrMs: number }) {
+    this.dasMs = Math.max(0, Math.floor(Number(opts.dasMs)));
+    this.arrMs = Math.max(0, Math.floor(Number(opts.arrMs)));
   }
 
   mount() {
@@ -97,11 +45,9 @@ export class InputManager {
   }
 
   setEnabled(enabled: boolean) {
-    if (this.enabled === enabled) return;
     this.enabled = enabled;
-
     if (!enabled) {
-      // Release any held actions cleanly
+      // Release held actions cleanly
       for (const code of this.down) {
         const a = this.codeToAction(code);
         if (a) this.heldHandlers[a]?.(false);
@@ -123,48 +69,112 @@ export class InputManager {
     this.heldHandlers = h;
   }
 
-  /** Call once per frame to advance DAS/ARR timers. */
+  /** Call once per frame from GameScreen loop. */
   update(dtMs: number) {
     if (!this.enabled) return;
 
-    // If no current direction, nothing to do.
+    // Held actions (soft drop)
+    const soft = this.keybinds.softDrop;
+    this.heldHandlers.softDrop?.(this.down.has(soft));
+
+    // Horizontal DAS/ARR repeat
+    this.updateHorizontalRepeat(dtMs);
+  }
+
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (!this.enabled) return;
+
+    const code = e.code;
+
+    // Stop browser scrolling while playing (arrows/space).
+    if (["ArrowLeft", "ArrowRight", "ArrowDown", "Space"].includes(code)) {
+      e.preventDefault();
+    }
+
+    if (this.down.has(code)) return; // edge-trigger only (avoid OS repeat)
+    this.down.add(code);
+
+    const action = this.codeToAction(code);
+    if (!action) return;
+
+    // Horizontal movement special-cased for DAS/ARR
+    if (action === "moveLeft") {
+      this.startHorizontal("left");
+      this.handlers.moveLeft?.(); // immediate step
+      return;
+    }
+    if (action === "moveRight") {
+      this.startHorizontal("right");
+      this.handlers.moveRight?.(); // immediate step
+      return;
+    }
+
+    // Other actions: fire once on press
+    this.handlers[action]?.();
+    this.heldHandlers[action]?.(true);
+  };
+
+  private onKeyUp = (e: KeyboardEvent) => {
+    const code = e.code;
+    this.down.delete(code);
+
+    const action = this.codeToAction(code);
+    if (!action) return;
+
+    // Release held handler
+    this.heldHandlers[action]?.(false);
+
+    // Horizontal key release: if other dir still held, switch; else stop repeating.
+    if (action === "moveLeft" || action === "moveRight") {
+      const leftDown = this.isActionDown("moveLeft");
+      const rightDown = this.isActionDown("moveRight");
+
+      if (leftDown && !rightDown) {
+        this.startHorizontal("left");
+        this.handlers.moveLeft?.(); // optional immediate step on switch
+      } else if (rightDown && !leftDown) {
+        this.startHorizontal("right");
+        this.handlers.moveRight?.();
+      } else {
+        this.resetHorizontal();
+      }
+    }
+  };
+
+  private updateHorizontalRepeat(dtMs: number) {
     if (!this.repeatDir) return;
 
-    // Ensure the chosen direction is still held down.
     const wantAction: Action = this.repeatDir === "left" ? "moveLeft" : "moveRight";
     if (!this.isActionDown(wantAction)) {
-      // Let keyup logic handle switching; just reset.
       this.resetHorizontal();
       return;
     }
 
-    // Accumulate DAS.
     this.dasAcc += dtMs;
 
     if (!this.repeating) {
-      if (this.dasAcc < DAS_MS) return;
+      if (this.dasAcc < this.dasMs) return;
 
       this.repeating = true;
       this.arrAcc = 0;
 
-      // ARR=0 means “instant” after DAS.
-      if (ARR_MS === 0) {
+      // ARR=0: instant to wall after DAS
+      if (this.arrMs === 0) {
         this.repeatToWall();
         return;
       }
     }
 
-    if (ARR_MS === 0) return;
+    if (this.arrMs === 0) return;
 
     this.arrAcc += dtMs;
-    while (this.arrAcc >= ARR_MS) {
-      this.arrAcc -= ARR_MS;
+    while (this.arrAcc >= this.arrMs) {
+      this.arrAcc -= this.arrMs;
       this.stepRepeatOnce();
     }
   }
 
   private startHorizontal(dir: RepeatDir) {
-    // Switching directions should reset DAS/ARR timing.
     if (this.repeatDir !== dir) {
       this.repeatDir = dir;
       this.dasAcc = 0;
@@ -186,8 +196,7 @@ export class InputManager {
   }
 
   private repeatToWall() {
-    // We don’t have a boolean “moved” return, so use a safe cap.
-    // Board is 10 wide; 40 is plenty.
+    // Safe cap; board width is 10 so this is plenty.
     for (let i = 0; i < 40; i++) this.stepRepeatOnce();
   }
 

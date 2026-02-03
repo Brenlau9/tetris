@@ -44,10 +44,18 @@ export class Engine {
   private lockAcc = 0;
   private softDropDown = false;
 
+  // ---- Tuning (runtime configurable) ----
+  private softDropMs = SOFT_DROP_MS;
+
   private events: EngineEvents;
 
   constructor(events: EngineEvents) {
     this.events = events;
+  }
+
+  setTuning(opts: { softDropMs: number }) {
+    const v = Math.max(1, Math.floor(Number(opts.softDropMs)));
+    this.softDropMs = v;
   }
 
   startNewRun() {
@@ -70,7 +78,7 @@ export class Engine {
     this.queue = [];
     while (this.queue.length < 5) this.queue.push(this.bag.next());
 
-    // Spawn first piece (countdown shows board + piece, but no input/gravity)
+    // Spawn first piece
     this.spawn();
   }
 
@@ -99,13 +107,12 @@ export class Engine {
 
     this.timeMs += dtMs;
 
-    const fallInterval = this.softDropDown ? SOFT_DROP_MS : GRAVITY_MS;
+    const fallInterval = this.softDropDown ? this.softDropMs : GRAVITY_MS;
     this.fallAcc += dtMs;
 
     while (this.fallAcc >= fallInterval) {
       this.fallAcc -= fallInterval;
       if (!this.tryMove(0, 1)) {
-        // on ground: lock delay accumulates
         break;
       }
     }
@@ -139,10 +146,7 @@ export class Engine {
     this.lockPiece(true);
   }
 
-  /**
-   * Ghost piece Y position (same X/rotation as active), computed without mutating state.
-   * Returns null if no active piece exists.
-   */
+  /** Ghost landing Y for the active piece (does not mutate state). */
   getGhostY(): number | null {
     if (!this.active) return null;
     return this.active.y + this.board.dropDistance(this.active);
@@ -181,7 +185,6 @@ export class Engine {
 
   // -------- internals --------
   private spawn(forcedType?: Tetromino) {
-    // Pull from visible queue unless forced (hold swap)
     const type = forcedType ?? this.queue.shift()!;
     while (this.queue.length < 5) this.queue.push(this.bag.next());
 
@@ -196,7 +199,6 @@ export class Engine {
     this.holdUsedThisTurn = false;
     this.lockAcc = 0;
 
-    // Top-out: failed spawn placement -> go to start screen
     if (!this.board.canPlace(this.active)) {
       this.state = "finished";
       this.events.onTopOut();
@@ -209,7 +211,6 @@ export class Engine {
     const test = { ...this.active, x: this.active.x + dx, y: this.active.y + dy };
     if (this.board.canPlace(test)) {
       this.active = test;
-      // movement resets lock delay
       this.lockAcc = 0;
       return true;
     }
@@ -227,7 +228,7 @@ export class Engine {
         ...this.active,
         rot: to,
         x: this.active.x + k.x,
-        y: this.active.y - k.y, // board y grows downward
+        y: this.active.y - k.y,
       };
       if (this.board.canPlace(test)) {
         this.active = test;
