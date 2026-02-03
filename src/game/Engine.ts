@@ -36,7 +36,7 @@ export class Engine {
   hold: Tetromino | null = null;
   holdUsedThisTurn = false;
 
-  // NEW: visible queue (next 5)
+  // visible queue (next 5)
   queue: Tetromino[] = [];
 
   // timing
@@ -137,6 +137,15 @@ export class Engine {
     const d = this.board.dropDistance(this.active);
     this.active.y += d;
     this.lockPiece(true);
+  }
+
+  /**
+   * Ghost piece Y position (same X/rotation as active), computed without mutating state.
+   * Returns null if no active piece exists.
+   */
+  getGhostY(): number | null {
+    if (!this.active) return null;
+    return this.active.y + this.board.dropDistance(this.active);
   }
 
   rotateCW() {

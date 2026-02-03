@@ -13,7 +13,7 @@ export class GameScreen implements Screen {
   private canvas!: HTMLCanvasElement;
   private ctx!: CanvasRenderingContext2D;
 
-  // NEW: overlay canvas above the board for hidden-row piece visibility
+  // overlay canvas above the board for hidden-row piece visibility
   private spawnCanvas!: HTMLCanvasElement;
   private spawnCtx!: CanvasRenderingContext2D;
 
@@ -40,9 +40,6 @@ export class GameScreen implements Screen {
     this.root = document.createElement("div");
     this.root.className = "card";
 
-    // NOTE:
-    // - boardStage has overflow: visible so the spawnCanvas can show above.
-    // - boardClip keeps the board canvas clipped to exactly visible height.
     this.root.innerHTML = `
       <div class="gameLayout">
         <div class="canvasWrap" style="position: relative; padding: 12px; overflow: visible;">
@@ -198,6 +195,7 @@ export class GameScreen implements Screen {
 
     // Enable input only during play
     this.input.setEnabled(this.engine.state === "playing");
+
     this.input.update(dt);
     this.engine.update(dt);
 
@@ -257,12 +255,28 @@ export class GameScreen implements Screen {
       }
     }
 
-    // active piece blocks that are in visible rows only
+    // ghost + active piece (visible rows only)
     const a = this.engine.active;
     if (a) {
       const blocks = SHAPES[a.type][a.rot];
       const color = pieceColorIndex(a.type);
 
+      // Ghost piece: landing position preview (drawn behind active piece)
+      const ghostY = this.engine.getGhostY();
+      if (ghostY !== null && ghostY !== a.y) {
+        for (const b of blocks) {
+          const boardY = ghostY + b.y;
+          if (boardY < HIDDEN_ROWS) continue;
+          if (boardY >= ROWS) continue;
+
+          const vy = boardY - HIDDEN_ROWS;
+          if (vy >= 0 && vy < VISIBLE_ROWS) {
+            drawGhostCell(ctx, a.x + b.x, vy);
+          }
+        }
+      }
+
+      // Active piece
       for (const b of blocks) {
         const boardY = a.y + b.y;
         if (boardY < HIDDEN_ROWS) continue;
@@ -351,6 +365,13 @@ function drawCell(ctx: CanvasRenderingContext2D, x: number, y: number, c: number
   ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
   ctx.strokeStyle = "rgba(0,0,0,0.15)";
   ctx.strokeRect(x * CELL + 0.5, y * CELL + 0.5, CELL - 1, CELL - 1);
+}
+
+function drawGhostCell(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  // Minimalist ghost: inset outline only (no fill), drawn behind the active piece.
+  ctx.strokeStyle = "rgba(0,0,0,0.25)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x * CELL + 1.5, y * CELL + 1.5, CELL - 3, CELL - 3);
 }
 
 // Pixel-positioned cell for the spawn overlay canvas
