@@ -19,7 +19,7 @@ export class StartScreen implements Screen {
     const bestText = best === null ? "—" : formatMs(best);
 
     this.root.innerHTML = `
-      <h1 class="h1">Minimalist Tetris</h1>
+      <h1 class="h1">Tetris</h1>
       <div class="muted">40 Lines · 7-bag · Hold · 180 · Lock delay · SRS/SRS+</div>
       <div class="kv">
         <div>Best 40L</div><div><code>${bestText}</code></div>
