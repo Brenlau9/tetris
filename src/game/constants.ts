@@ -7,7 +7,7 @@ export const CELL = 28; // internal pixel size for one block
 
 // Gameplay tuning (minimalist defaults)
 export const GRAVITY_MS = 800;      // normal fall
-export const SOFT_DROP_MS = 35;     // while held
+export const SOFT_DROP_MS = 0;     // while held
 export const LOCK_DELAY_MS = 500;   // lock delay duration
 
 export const COUNTDOWN_SECONDS = 3;

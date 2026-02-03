@@ -50,7 +50,6 @@ export class ControlsScreen implements Screen {
 
     this.root.innerHTML = `
       <h1 class="h1">Controls</h1>
-      <div class="muted">No pause. Countdown disables input until GO.</div>
 
       <div style="margin-top: 14px;">
         ${rows}
