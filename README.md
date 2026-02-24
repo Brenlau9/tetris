@@ -4,7 +4,6 @@ A personal Tetris project built for fun and experimentation, with a focus on gam
 
 This project is not intended to be a perfect or fully polished Tetris clone. Instead, it serves as a hands-on learning project to design and iteratively improve a real-time game system from scratch.
 
----
 
 ## Motivation
 
@@ -20,7 +19,6 @@ The goal of this project is twofold:
    AI tools were used as a coding assistant to speed up implementation and suggest approaches, while all architectural decisions, feature design, and debugging were done manually.  
    The project intentionally keeps logic explicit and readable to better understand how AI fits into real-world development workflows.
 
----
 
 ## Features
 
@@ -33,7 +31,6 @@ The goal of this project is twofold:
 - Modular input management system
 - Expandable settings system for control customization
 
----
 
 ## Tech Stack
 
@@ -42,7 +39,6 @@ The goal of this project is twofold:
 - **Architecture:** Modular game engine + screen-based UI
 - **Tooling:** Vite
 
----
 
 ## Controls (Default)
 
@@ -56,7 +52,6 @@ The goal of this project is twofold:
 
 > DAS, ARR, and soft drop speed are configurable in the settings menu.
 
----
 
 ## Project Structure
 ```
