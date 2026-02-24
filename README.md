@@ -71,6 +71,9 @@ The goal of this project is twofold:
 ├── README.md # Project documentation (this file)
 └── (other build/dev config files)
 ```
+
+---
+
 ## Running the Project
 
 ```bash
